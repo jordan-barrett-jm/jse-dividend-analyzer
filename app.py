@@ -259,11 +259,16 @@ def get_stock_detail(symbol: str) -> dict:
     if not stock_divs.empty:
         stock_divs_sorted = stock_divs.sort_values("payment_date")
         for _, row in stock_divs_sorted.iterrows():
+            currency = str(row.get("currency", "JMD") or "JMD")
+            amount_orig = float(row["dividend_amount"])
+            amount_jmd = float(row["dividend_amount_jmd"]) if "dividend_amount_jmd" in row and pd.notna(row["dividend_amount_jmd"]) else amount_orig
             dividend_history.append({
                 "payment_date": row["payment_date"].date().isoformat(),
                 "ex_date": row["ex_date"].date().isoformat() if pd.notna(row.get("ex_date")) else None,
                 "record_date": row["record_date"].date().isoformat() if pd.notna(row.get("record_date")) else None,
-                "dividend_amount": float(row["dividend_amount"]),
+                "dividend_amount": amount_orig,
+                "currency": currency,
+                "dividend_amount_jmd": amount_jmd,
             })
 
     price_history = []

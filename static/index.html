@@ -214,7 +214,8 @@
             <thead><tr class="text-xs text-gray-500 uppercase border-b border-gray-200">
               <th class="py-2 text-left">Payment Date</th>
               <th class="py-2 text-left">Ex-Date</th>
-              <th class="py-2 text-right">Amount (JMD)</th>
+              <th class="py-2 text-right">Amount</th>
+              <th class="py-2 text-right">JMD Equiv.</th>
             </tr></thead>
             <tbody id="modal-div-table" class="divide-y divide-gray-100"></tbody>
           </table>
@@ -436,7 +437,7 @@ function renderMiniCharts(detail) {
       type: 'bar',
       data: {
         labels: detail.dividend_history.map(d => d.payment_date),
-        datasets: [{ label: 'Dividend', data: detail.dividend_history.map(d => d.dividend_amount),
+        datasets: [{ label: 'Dividend (JMD)', data: detail.dividend_history.map(d => d.dividend_amount_jmd ?? d.dividend_amount),
           backgroundColor: 'rgba(22,163,74,0.7)', borderRadius: 3 }]
       },
       options: { ...miniChartOpts('JMD $') }
@@ -543,18 +544,21 @@ async function openModal(symbol) {
     document.getElementById('modal-price-chart').getContext('2d');
   }
 
-  // Dividend bar chart
+  // Dividend bar chart — use JMD-equivalent amounts so scale is consistent
   if (d.dividend_history.length) {
     modalDivChart = new Chart(document.getElementById('modal-div-chart'), {
       type: 'bar',
       data: {
         labels: d.dividend_history.map(p => p.payment_date),
-        datasets: [{ label: 'Dividend (JMD)', data: d.dividend_history.map(p => p.dividend_amount),
+        datasets: [{ label: 'Dividend (JMD)', data: d.dividend_history.map(p => p.dividend_amount_jmd ?? p.dividend_amount),
           backgroundColor: 'rgba(22,163,74,0.75)', borderRadius: 4 }]
       },
       options: {
         responsive: true,
-        plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+        plugins: { legend: { display: false }, tooltip: {
+          mode: 'index', intersect: false,
+          callbacks: { label: ctx => `J$${ctx.parsed.y.toFixed(4)}` }
+        }},
         scales: { x: { ticks: { maxTicksLimit: 10 } }, y: { title: { display: true, text: 'JMD $' } } }
       }
     });
@@ -562,13 +566,21 @@ async function openModal(symbol) {
 
   // Dividend table (most recent first)
   const rows = [...d.dividend_history].reverse();
-  document.getElementById('modal-div-table').innerHTML = rows.map(p =>
-    `<tr>
+  document.getElementById('modal-div-table').innerHTML = rows.map(p => {
+    const isForeign = p.currency && p.currency !== 'JMD';
+    const origAmt = isForeign
+      ? `${p.currency} ${p.dividend_amount.toFixed(4)}`
+      : `J$${p.dividend_amount.toFixed(4)}`;
+    const jmdAmt = isForeign
+      ? `<span class="text-gray-700">J$${(p.dividend_amount_jmd ?? p.dividend_amount).toFixed(4)}</span>`
+      : `<span class="text-gray-400">—</span>`;
+    return `<tr>
       <td class="py-2 text-gray-700">${p.payment_date}</td>
       <td class="py-2 text-gray-500">${p.ex_date || '—'}</td>
-      <td class="py-2 font-mono text-right">$${p.dividend_amount.toFixed(4)}</td>
-    </tr>`
-  ).join('');
+      <td class="py-2 font-mono text-right ${isForeign ? 'text-amber-700' : 'text-gray-700'}">${origAmt}</td>
+      <td class="py-2 font-mono text-right">${jmdAmt}</td>
+    </tr>`;
+  }).join('');
 
   document.getElementById('modal-backdrop').classList.remove('hidden');
   renderYieldHistory(symbol, _currentCadence);
