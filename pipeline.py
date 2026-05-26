@@ -109,6 +109,19 @@ async def get_companies(session: aiohttp.ClientSession, status_cb=None) -> list[
 
 # ── dividends ──────────────────────────────────────────────────────────────────
 
+_CURRENCY_RE = re.compile(r"\b([A-Z]{3})\b")
+
+def _parse_dividend_cell(raw: str) -> tuple[float | None, str]:
+    """Return (amount, currency_code) from a raw dividend cell like '\\n TTD 0.5200\\n'."""
+    currency = "JMD"
+    m = _CURRENCY_RE.search(raw)
+    if m:
+        currency = m.group(1)
+    cleaned = re.sub(r"[^\d.]", " ", raw).split()
+    amount = next((float(p) for p in reversed(cleaned) if _is_float(p)), None)
+    return amount, currency
+
+
 def _parse_dividends(html: str, company: dict) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
     table = next(
@@ -124,20 +137,19 @@ def _parse_dividends(html: str, company: dict) -> list[dict]:
         cells = tr.find_all("td")
         if len(cells) < 5:
             continue
-        raw = cells[4].get_text()
-        cleaned = re.sub(r"[^\d.]", " ", raw).split()
-        amount = next((float(p) for p in reversed(cleaned) if _is_float(p)), None)
+        amount, currency = _parse_dividend_cell(cells[4].get_text())
         if amount is None:
             continue
         rows.append({
-            "company_name": company["company_name"],
-            "symbol":       company["symbol"],
-            "sector":       company["sector"],
-            "market":       company["market"],
-            "record_date":  clean(cells[0].get_text()),
-            "ex_date":      clean(cells[2].get_text()),
-            "payment_date": clean(cells[3].get_text()),
+            "company_name":    company["company_name"],
+            "symbol":          company["symbol"],
+            "sector":          company["sector"],
+            "market":          company["market"],
+            "record_date":     clean(cells[0].get_text()),
+            "ex_date":         clean(cells[2].get_text()),
+            "payment_date":    clean(cells[3].get_text()),
             "dividend_amount": amount,
+            "currency":        currency,
         })
     return rows
 
@@ -302,7 +314,7 @@ async def run_pipeline(status_cb=None, force: bool = False):
         )
 
     div_fields = ["company_name", "symbol", "sector", "market",
-                  "record_date", "ex_date", "payment_date", "dividend_amount"]
+                  "record_date", "ex_date", "payment_date", "dividend_amount", "currency"]
     with open(DIVIDENDS_CSV, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=div_fields)
         w.writeheader()

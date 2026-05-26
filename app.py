@@ -7,6 +7,7 @@ import asyncio
 import json
 import math
 import re
+import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,32 @@ def _invalidate_cache():
     _cache.clear()
 
 
+# ── FX rates ───────────────────────────────────────────────────────────────────
+
+_fx_cache: dict = {}   # {"rates": {...}, "fetched_date": "YYYY-MM-DD"}
+
+def _to_jmd(amount: float, currency: str) -> float:
+    """Convert an amount in any currency to JMD using cached daily FX rates."""
+    if not currency or currency == "JMD":
+        return amount
+    today_str = date.today().isoformat()
+    if _fx_cache.get("fetched_date") != today_str:
+        try:
+            with urllib.request.urlopen(
+                "https://open.er-api.com/v6/latest/JMD", timeout=5
+            ) as resp:
+                data = json.loads(resp.read())
+            _fx_cache["rates"] = data.get("rates", {})
+            _fx_cache["fetched_date"] = today_str
+        except Exception:
+            pass   # if fetch fails, fall back to whatever is cached (or 1:1)
+    rate = _fx_cache.get("rates", {}).get(currency)
+    if rate and rate > 0:
+        # rate = units of `currency` per 1 JMD  →  JMD = amount / rate
+        return amount / rate
+    return amount   # unknown currency — return as-is
+
+
 def _clean(obj):
     """Recursively replace nan/inf floats with None for JSON safety."""
     if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
@@ -84,6 +111,12 @@ def _load_dividends() -> pd.DataFrame:
             df[col] = pd.to_datetime(df[col], errors="coerce")
     df["dividend_amount"] = pd.to_numeric(df["dividend_amount"], errors="coerce")
     df = df.dropna(subset=["dividend_amount", "payment_date"])
+    if "currency" not in df.columns:
+        df["currency"] = "JMD"
+    # Pre-convert all amounts to JMD
+    df["dividend_amount_jmd"] = df.apply(
+        lambda r: _to_jmd(r["dividend_amount"], r.get("currency", "JMD")), axis=1
+    )
     _cache["dividends"] = df
     return df
 
@@ -139,7 +172,7 @@ def compute_consistency(dividends_df: pd.DataFrame, years: int = 5) -> list[dict
 
         # Trailing 12-month dividends
         t12_cutoff = pd.Timestamp(date.today()) - pd.DateOffset(months=12)
-        t12 = recent_grp[recent_grp["payment_date"] >= t12_cutoff]["dividend_amount"].sum()
+        t12 = recent_grp[recent_grp["payment_date"] >= t12_cutoff]["dividend_amount_jmd"].sum()
 
         results.append({
             "symbol": symbol,
@@ -184,7 +217,7 @@ def compute_yield_at_date(
         price = _price_near(prices_df, symbol, as_of)
         if price is None or price <= 0:
             continue
-        total_div = float(grp["dividend_amount"].sum())
+        total_div = float(grp["dividend_amount_jmd"].sum())
         yld = round(total_div / price * 100, 2)
         meta = grp.iloc[0]
         results.append({
@@ -227,7 +260,7 @@ def get_stock_yield_history(symbol: str, cadence: str = "monthly") -> list[dict]
             stock_divs[
                 (stock_divs["payment_date"] <= period_end) &
                 (stock_divs["payment_date"] >= window_start)
-            ]["dividend_amount"].sum()
+            ]["dividend_amount_jmd"].sum()
         )
         results.append({
             "date": period_end.date().isoformat(),
