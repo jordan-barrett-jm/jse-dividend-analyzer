@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JSE Dividend Analysis</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  .tab-btn.active { border-bottom: 3px solid #2563eb; color: #2563eb; font-weight: 600; }
+  .table-row:hover { background: #f0f7ff; cursor: pointer; }
+  .score-bar { height: 6px; border-radius: 3px; background: #e5e7eb; overflow: hidden; }
+  .score-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+  #modal-backdrop { transition: opacity 0.2s; }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  thead th { position: sticky; top: 0; background: #f8fafc; z-index: 1; }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- HEADER -->
+<header class="bg-white border-b border-gray-200 px-6 py-4">
+  <div class="max-w-7xl mx-auto flex items-center justify-between flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">JSE Dividend Analysis</h1>
+      <p id="data-info" class="text-sm text-gray-500 mt-0.5">Loading data info…</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <div id="pipeline-badge" class="hidden items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
+        <svg class="spin w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        Pipeline running…
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="btn-run" onclick="triggerPipeline(false)" class="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          Refresh Data
+        </button>
+        <div class="relative group">
+          <button class="text-gray-400 hover:text-gray-600 px-1" title="More options">&#8942;</button>
+          <div class="hidden group-hover:block absolute right-0 top-6 bg-white border border-gray-200 rounded-lg shadow-lg z-10 w-44">
+            <button onclick="triggerPipeline(true)" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50">
+              Force full re-scrape
+            </button>
+          </div>
+        </div>
+      </div>
+      <button onclick="document.getElementById('log-panel').classList.toggle('hidden')" class="text-sm text-gray-500 hover:text-gray-700 underline">Logs</button>
+    </div>
+  </div>
+  <!-- Log panel -->
+  <div id="log-panel" class="hidden max-w-7xl mx-auto mt-3">
+    <pre id="log-output" class="text-xs bg-gray-900 text-green-400 rounded-lg p-4 max-h-48 overflow-y-auto whitespace-pre-wrap"></pre>
+  </div>
+</header>
+
+<!-- TABS -->
+<div class="bg-white border-b border-gray-200">
+  <div class="max-w-7xl mx-auto px-6 flex gap-6">
+    <button class="tab-btn active py-4 text-sm border-b-3 border-transparent" onclick="switchTab('consistency')">Consistency Rankings</button>
+    <button class="tab-btn py-4 text-sm border-b-3 border-transparent text-gray-500" onclick="switchTab('yield')">Yield at Date</button>
+    <button class="tab-btn py-4 text-sm border-b-3 border-transparent text-gray-500" onclick="switchTab('compare')">Compare Stocks</button>
+  </div>
+</div>
+
+<main class="max-w-7xl mx-auto px-6 py-6">
+
+  <!-- ── CONSISTENCY TAB ── -->
+  <div id="tab-consistency">
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-800">Dividend Consistency Rankings</h2>
+        <p class="text-sm text-gray-500">Stocks ranked by how consistently they've paid dividends over the last 5 years</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <input id="consistency-search" type="text" placeholder="Filter by symbol or name…" oninput="renderConsistency()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-52 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <select id="market-filter" onchange="renderConsistency()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="">All Markets</option>
+          <option value="Main Market">Main Market</option>
+          <option value="Junior Market">Junior Market</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div class="overflow-x-auto max-h-[65vh] overflow-y-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-200">
+              <th class="px-4 py-3 font-medium">Rank</th>
+              <th class="px-4 py-3 font-medium cursor-pointer hover:text-blue-600" onclick="sortConsistency('symbol')">Symbol ↕</th>
+              <th class="px-4 py-3 font-medium">Company</th>
+              <th class="px-4 py-3 font-medium">Sector</th>
+              <th class="px-4 py-3 font-medium">Market</th>
+              <th class="px-4 py-3 font-medium cursor-pointer hover:text-blue-600" onclick="sortConsistency('years_paying')">Years Paying ↕</th>
+              <th class="px-4 py-3 font-medium cursor-pointer hover:text-blue-600" onclick="sortConsistency('avg_payments_per_year')">Pmts/Year ↕</th>
+              <th class="px-4 py-3 font-medium cursor-pointer hover:text-blue-600" onclick="sortConsistency('trailing_12m_dividends')">Trailing 12m Div ↕</th>
+              <th class="px-4 py-3 font-medium w-36">Consistency</th>
+            </tr>
+          </thead>
+          <tbody id="consistency-body" class="divide-y divide-gray-100"></tbody>
+        </table>
+      </div>
+    </div>
+    <p id="consistency-count" class="text-xs text-gray-400 mt-2"></p>
+  </div>
+
+  <!-- ── YIELD TAB ── -->
+  <div id="tab-yield" class="hidden">
+    <div id="yield-date-warning" class="hidden mb-3 flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
+      <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+      <span id="yield-date-warning-text"></span>
+    </div>
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-800">Dividend Yield at Date</h2>
+        <p class="text-sm text-gray-500">Trailing 12-month dividends divided by share price at the selected date</p>
+      </div>
+      <div class="flex items-center gap-3 flex-wrap">
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-600">Date:</label>
+          <input id="yield-date" type="date" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-600">Min payments:</label>
+          <select id="yield-min-payments" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="1">1+</option>
+            <option value="2" selected>2+</option>
+            <option value="4">4+</option>
+          </select>
+        </div>
+        <button onclick="loadYield()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg">Calculate</button>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div class="overflow-x-auto max-h-[65vh] overflow-y-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-200">
+              <th class="px-4 py-3 font-medium">Rank</th>
+              <th class="px-4 py-3 font-medium">Symbol</th>
+              <th class="px-4 py-3 font-medium">Company</th>
+              <th class="px-4 py-3 font-medium">Sector</th>
+              <th class="px-4 py-3 font-medium">Market</th>
+              <th class="px-4 py-3 font-medium">Price at Date</th>
+              <th class="px-4 py-3 font-medium">Trailing Divs (12m)</th>
+              <th class="px-4 py-3 font-medium">Payments</th>
+              <th class="px-4 py-3 font-medium">Yield %</th>
+            </tr>
+          </thead>
+          <tbody id="yield-body" class="divide-y divide-gray-100"></tbody>
+        </table>
+      </div>
+    </div>
+    <p id="yield-count" class="text-xs text-gray-400 mt-2"></p>
+  </div>
+
+  <!-- ── COMPARE TAB ── -->
+  <div id="tab-compare" class="hidden">
+    <div class="mb-4">
+      <h2 class="text-lg font-semibold text-gray-800 mb-1">Compare Stocks</h2>
+      <p class="text-sm text-gray-500 mb-3">Select stocks to compare their dividend history and price over time</p>
+      <div class="flex items-center gap-3 flex-wrap">
+        <select id="compare-select" multiple class="border border-gray-300 rounded-lg px-3 py-2 text-sm h-24 focus:outline-none focus:ring-2 focus:ring-blue-500 w-64">
+        </select>
+        <div class="text-sm text-gray-500">Hold Cmd/Ctrl to select multiple</div>
+        <button onclick="loadCompare()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg self-start">Compare</button>
+      </div>
+    </div>
+    <div id="compare-charts" class="grid grid-cols-1 gap-6"></div>
+  </div>
+
+</main>
+
+<!-- DETAIL MODAL -->
+<div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-40 hidden z-50 flex items-center justify-center p-4" onclick="closeModal(event)">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+      <div>
+        <h2 id="modal-title" class="text-xl font-bold text-gray-900"></h2>
+        <p id="modal-subtitle" class="text-sm text-gray-500"></p>
+      </div>
+      <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+    </div>
+    <div class="px-6 py-4 space-y-6">
+      <!-- Yield history chart -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide">Trailing 12m Yield Over Time</h3>
+          <div class="flex rounded-lg border border-gray-200 overflow-hidden text-xs">
+            <button id="cadence-monthly" onclick="setCadence('monthly')" class="px-3 py-1 bg-blue-600 text-white font-medium">Monthly</button>
+            <button id="cadence-quarterly" onclick="setCadence('quarterly')" class="px-3 py-1 text-gray-600 hover:bg-gray-50">Quarterly</button>
+          </div>
+        </div>
+        <canvas id="modal-yield-chart" height="110"></canvas>
+      </div>
+      <!-- Price chart -->
+      <div>
+        <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-2">Share Price</h3>
+        <canvas id="modal-price-chart" height="100"></canvas>
+      </div>
+      <!-- Dividend bar chart -->
+      <div>
+        <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-2">Dividend Payments</h3>
+        <canvas id="modal-div-chart" height="80"></canvas>
+      </div>
+      <!-- Dividend table -->
+      <div>
+        <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-2">Payment History</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="text-xs text-gray-500 uppercase border-b border-gray-200">
+              <th class="py-2 text-left">Payment Date</th>
+              <th class="py-2 text-left">Ex-Date</th>
+              <th class="py-2 text-right">Amount (JMD)</th>
+            </tr></thead>
+            <tbody id="modal-div-table" class="divide-y divide-gray-100"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── state ────────────────────────────────────────────────────────────────────
+let consistencyData = [];
+let consistencySort = { key: null, asc: true };
+let modalPriceChart = null;
+let modalDivChart = null;
+let modalYieldChart = null;
+let _currentModalSymbol = null;
+let _currentCadence = 'monthly';
+let pollInterval = null;
+
+// ── init ─────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
+  // Set yield date to today
+  document.getElementById('yield-date').value = new Date().toISOString().split('T')[0];
+  await loadDataInfo();
+  await Promise.all([loadConsistency(), loadStockList()]);
+  await loadYield();
+  checkPipelineStatus();
+});
+
+// ── tabs ─────────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  ['consistency', 'yield', 'compare'].forEach(t => {
+    document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== name);
+  });
+  document.querySelectorAll('.tab-btn').forEach((btn, i) => {
+    const names = ['consistency', 'yield', 'compare'];
+    btn.classList.toggle('active', names[i] === name);
+    btn.classList.toggle('text-gray-500', names[i] !== name);
+  });
+}
+
+// ── data info ─────────────────────────────────────────────────────────────────
+let _priceLastDate = null;
+
+async function loadDataInfo() {
+  try {
+    const r = await fetch('/api/data-info');
+    const d = await r.json();
+    _priceLastDate = d.price_last_date;
+    const priceDate = d.price_last_date || 'N/A';
+    const divDate = d.dividend_last_date || 'N/A';
+    document.getElementById('data-info').textContent =
+      `${d.dividends_count.toLocaleString()} dividend records · ${d.prices_count.toLocaleString()} price rows · Prices to ${priceDate} · Divs to ${divDate}`;
+    // Default yield date picker to last available price date
+    if (d.price_last_date) {
+      document.getElementById('yield-date').value = d.price_last_date;
+    }
+  } catch(e) {
+    document.getElementById('data-info').textContent = 'Could not load data info';
+  }
+}
+
+// ── consistency ──────────────────────────────────────────────────────────────
+async function loadConsistency() {
+  const r = await fetch('/api/consistency?top=500');
+  const d = await r.json();
+  consistencyData = d.data;
+  renderConsistency();
+}
+
+function sortConsistency(key) {
+  if (consistencySort.key === key) {
+    consistencySort.asc = !consistencySort.asc;
+  } else {
+    consistencySort.key = key;
+    consistencySort.asc = false;
+  }
+  renderConsistency();
+}
+
+function renderConsistency() {
+  const search = document.getElementById('consistency-search').value.toLowerCase();
+  const market = document.getElementById('market-filter').value;
+
+  let data = consistencyData.filter(r => {
+    const matchSearch = !search ||
+      r.symbol.toLowerCase().includes(search) ||
+      r.company_name.toLowerCase().includes(search);
+    const matchMarket = !market || r.market === market;
+    return matchSearch && matchMarket;
+  });
+
+  if (consistencySort.key) {
+    data = [...data].sort((a, b) => {
+      const av = a[consistencySort.key], bv = b[consistencySort.key];
+      return consistencySort.asc ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
+    });
+  }
+
+  const body = document.getElementById('consistency-body');
+  body.innerHTML = data.map((r, i) => {
+    const pct = Math.round(r.consistency_score * 100);
+    const color = pct === 100 ? '#16a34a' : pct >= 60 ? '#2563eb' : pct >= 40 ? '#d97706' : '#dc2626';
+    return `<tr class="table-row" onclick="openModal('${r.symbol}')">
+      <td class="px-4 py-3 text-gray-400 font-mono">${i + 1}</td>
+      <td class="px-4 py-3 font-semibold text-blue-700">${r.symbol}</td>
+      <td class="px-4 py-3 text-gray-700 max-w-xs truncate">${r.company_name}</td>
+      <td class="px-4 py-3 text-gray-500">${r.sector || '—'}</td>
+      <td class="px-4 py-3"><span class="text-xs px-2 py-0.5 rounded-full ${r.market === 'Main Market' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}">${r.market || '—'}</span></td>
+      <td class="px-4 py-3 font-mono text-center">${r.years_paying}/5</td>
+      <td class="px-4 py-3 font-mono text-center">${r.avg_payments_per_year}</td>
+      <td class="px-4 py-3 font-mono text-right">${r.trailing_12m_dividends > 0 ? '$' + r.trailing_12m_dividends.toFixed(4) : '—'}</td>
+      <td class="px-4 py-3">
+        <div class="flex items-center gap-2">
+          <div class="score-bar flex-1"><div class="score-fill" style="width:${pct}%;background:${color}"></div></div>
+          <span class="text-xs font-mono w-8 text-right" style="color:${color}">${pct}%</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('consistency-count').textContent = `Showing ${data.length} of ${consistencyData.length} stocks`;
+}
+
+// ── yield ─────────────────────────────────────────────────────────────────────
+async function loadYield() {
+  const d = document.getElementById('yield-date').value;
+  const mp = document.getElementById('yield-min-payments').value;
+  const warning = document.getElementById('yield-date-warning');
+  const warningText = document.getElementById('yield-date-warning-text');
+
+  if (_priceLastDate && d > _priceLastDate) {
+    warning.classList.remove('hidden');
+    warningText.textContent =
+      `No price data after ${_priceLastDate} — results will be empty. Use "Refresh Data" to fetch newer prices, or pick a date on or before ${_priceLastDate}.`;
+  } else {
+    warning.classList.add('hidden');
+  }
+
+  const r = await fetch(`/api/yield?date=${d}&min_payments=${mp}&top=200`);
+  const data = await r.json();
+  renderYield(data.data, data.as_of);
+}
+
+function renderYield(rows, asOf) {
+  const body = document.getElementById('yield-body');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">No data found for this date</td></tr>';
+    document.getElementById('yield-count').textContent = '';
+    return;
+  }
+  body.innerHTML = rows.map((r, i) => {
+    const yColor = r.dividend_yield_pct > 10 ? '#16a34a' : r.dividend_yield_pct > 5 ? '#2563eb' : '#374151';
+    return `<tr class="table-row" onclick="openModal('${r.symbol}')">
+      <td class="px-4 py-3 text-gray-400 font-mono">${i + 1}</td>
+      <td class="px-4 py-3 font-semibold text-blue-700">${r.symbol}</td>
+      <td class="px-4 py-3 text-gray-700 max-w-xs truncate">${r.company_name}</td>
+      <td class="px-4 py-3 text-gray-500">${r.sector || '—'}</td>
+      <td class="px-4 py-3"><span class="text-xs px-2 py-0.5 rounded-full ${r.market === 'Main Market' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}">${r.market || '—'}</span></td>
+      <td class="px-4 py-3 font-mono text-right">$${r.price_at_date.toFixed(2)}</td>
+      <td class="px-4 py-3 font-mono text-right">$${r.trailing_dividends.toFixed(4)}</td>
+      <td class="px-4 py-3 font-mono text-center">${r.payment_count}</td>
+      <td class="px-4 py-3 font-mono text-right font-semibold" style="color:${yColor}">${r.dividend_yield_pct.toFixed(2)}%</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('yield-count').textContent = `${rows.length} stocks with data as of ${asOf}`;
+}
+
+// ── compare ──────────────────────────────────────────────────────────────────
+async function loadStockList() {
+  const r = await fetch('/api/stocks');
+  const d = await r.json();
+  const sel = document.getElementById('compare-select');
+  sel.innerHTML = d.data.map(s =>
+    `<option value="${s.symbol}">${s.symbol} – ${s.company_name}</option>`
+  ).join('');
+}
+
+async function loadCompare() {
+  const sel = document.getElementById('compare-select');
+  const symbols = Array.from(sel.selectedOptions).map(o => o.value);
+  if (!symbols.length) return;
+  const container = document.getElementById('compare-charts');
+  container.innerHTML = '<p class="text-sm text-gray-400">Loading…</p>';
+  const details = await Promise.all(symbols.map(s => fetch(`/api/stock/${s}`).then(r => r.json())));
+  container.innerHTML = '';
+  details.forEach(d => {
+    const div = document.createElement('div');
+    div.className = 'bg-white rounded-xl border border-gray-200 p-5';
+    div.innerHTML = `
+      <h3 class="font-bold text-gray-900 mb-1">${d.symbol} – ${d.company_name}</h3>
+      <p class="text-sm text-gray-500 mb-3">${d.sector || ''} · ${d.market || ''}</p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div><p class="text-xs text-gray-500 font-semibold uppercase mb-1">Share Price</p><canvas id="cmp-price-${d.symbol}" height="100"></canvas></div>
+        <div><p class="text-xs text-gray-500 font-semibold uppercase mb-1">Dividends Paid</p><canvas id="cmp-div-${d.symbol}" height="100"></canvas></div>
+      </div>`;
+    container.appendChild(div);
+    renderMiniCharts(d);
+  });
+}
+
+function renderMiniCharts(detail) {
+  const sym = detail.symbol;
+  if (detail.price_history.length) {
+    new Chart(document.getElementById(`cmp-price-${sym}`), {
+      type: 'line',
+      data: {
+        labels: detail.price_history.map(p => p.date),
+        datasets: [{ label: 'Price', data: detail.price_history.map(p => p.price),
+          borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.08)',
+          borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.2 }]
+      },
+      options: { ...miniChartOpts('JMD $') }
+    });
+  }
+  if (detail.dividend_history.length) {
+    new Chart(document.getElementById(`cmp-div-${sym}`), {
+      type: 'bar',
+      data: {
+        labels: detail.dividend_history.map(d => d.payment_date),
+        datasets: [{ label: 'Dividend', data: detail.dividend_history.map(d => d.dividend_amount),
+          backgroundColor: 'rgba(22,163,74,0.7)', borderRadius: 3 }]
+      },
+      options: { ...miniChartOpts('JMD $') }
+    });
+  }
+}
+
+function miniChartOpts(yLabel) {
+  return {
+    responsive: true,
+    plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+    scales: {
+      x: { ticks: { maxTicksLimit: 6, font: { size: 10 } }, grid: { display: false } },
+      y: { ticks: { font: { size: 10 } }, title: { display: false } }
+    }
+  };
+}
+
+// ── modal ─────────────────────────────────────────────────────────────────────
+function setCadence(cadence) {
+  _currentCadence = cadence;
+  document.getElementById('cadence-monthly').className = cadence === 'monthly'
+    ? 'px-3 py-1 bg-blue-600 text-white font-medium'
+    : 'px-3 py-1 text-gray-600 hover:bg-gray-50';
+  document.getElementById('cadence-quarterly').className = cadence === 'quarterly'
+    ? 'px-3 py-1 bg-blue-600 text-white font-medium'
+    : 'px-3 py-1 text-gray-600 hover:bg-gray-50';
+  if (_currentModalSymbol) renderYieldHistory(_currentModalSymbol, cadence);
+}
+
+async function renderYieldHistory(symbol, cadence) {
+  const r = await fetch(`/api/stock/${symbol}/yield-history?cadence=${cadence}`);
+  if (!r.ok) return;
+  const d = await r.json();
+  if (modalYieldChart) { modalYieldChart.destroy(); modalYieldChart = null; }
+  if (!d.data.length) return;
+
+  modalYieldChart = new Chart(document.getElementById('modal-yield-chart'), {
+    type: 'line',
+    data: {
+      labels: d.data.map(p => p.date),
+      datasets: [{
+        label: 'Trailing 12m Yield %',
+        data: d.data.map(p => p.yield_pct),
+        borderColor: '#16a34a',
+        backgroundColor: 'rgba(22,163,74,0.08)',
+        borderWidth: 2, pointRadius: 3, pointHoverRadius: 5,
+        fill: true, tension: 0.3,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => `Yield: ${ctx.parsed.y.toFixed(2)}%`,
+            afterLabel: ctx => {
+              const pt = d.data[ctx.dataIndex];
+              return [`Price: $${pt.price.toFixed(2)}`, `Divs: $${pt.trailing_12m_dividends.toFixed(4)}`];
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10, font: { size: 10 } }, grid: { display: false } },
+        y: { ticks: { callback: v => v + '%', font: { size: 10 } }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+async function openModal(symbol) {
+  const r = await fetch(`/api/stock/${symbol}`);
+  if (!r.ok) return;
+  const d = await r.json();
+
+  _currentModalSymbol = symbol;
+  document.getElementById('modal-title').textContent = `${d.symbol} – ${d.company_name}`;
+  document.getElementById('modal-subtitle').textContent = `${d.sector || ''} · ${d.market || ''}`;
+
+  // destroy old charts
+  if (modalPriceChart) { modalPriceChart.destroy(); modalPriceChart = null; }
+  if (modalDivChart) { modalDivChart.destroy(); modalDivChart = null; }
+  if (modalYieldChart) { modalYieldChart.destroy(); modalYieldChart = null; }
+
+  // Price chart
+  if (d.price_history.length) {
+    modalPriceChart = new Chart(document.getElementById('modal-price-chart'), {
+      type: 'line',
+      data: {
+        labels: d.price_history.map(p => p.date),
+        datasets: [{ label: 'Price (JMD)', data: d.price_history.map(p => p.price),
+          borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.07)',
+          borderWidth: 2, pointRadius: 0, fill: true, tension: 0.2 }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+        scales: { x: { ticks: { maxTicksLimit: 10 } }, y: { title: { display: true, text: 'JMD $' } } }
+      }
+    });
+  } else {
+    document.getElementById('modal-price-chart').getContext('2d');
+  }
+
+  // Dividend bar chart
+  if (d.dividend_history.length) {
+    modalDivChart = new Chart(document.getElementById('modal-div-chart'), {
+      type: 'bar',
+      data: {
+        labels: d.dividend_history.map(p => p.payment_date),
+        datasets: [{ label: 'Dividend (JMD)', data: d.dividend_history.map(p => p.dividend_amount),
+          backgroundColor: 'rgba(22,163,74,0.75)', borderRadius: 4 }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+        scales: { x: { ticks: { maxTicksLimit: 10 } }, y: { title: { display: true, text: 'JMD $' } } }
+      }
+    });
+  }
+
+  // Dividend table (most recent first)
+  const rows = [...d.dividend_history].reverse();
+  document.getElementById('modal-div-table').innerHTML = rows.map(p =>
+    `<tr>
+      <td class="py-2 text-gray-700">${p.payment_date}</td>
+      <td class="py-2 text-gray-500">${p.ex_date || '—'}</td>
+      <td class="py-2 font-mono text-right">$${p.dividend_amount.toFixed(4)}</td>
+    </tr>`
+  ).join('');
+
+  document.getElementById('modal-backdrop').classList.remove('hidden');
+  renderYieldHistory(symbol, _currentCadence);
+}
+
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('modal-backdrop')) {
+    document.getElementById('modal-backdrop').classList.add('hidden');
+    _currentModalSymbol = null;
+  }
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// ── pipeline ──────────────────────────────────────────────────────────────────
+async function triggerPipeline(force = false) {
+  if (_pipeline_state_running) return;
+  const btn = document.getElementById('btn-run');
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
+  await fetch(`/api/run?force=${force}`, { method: 'POST' });
+  startPolling();
+}
+let _pipeline_state_running = false;
+
+function startPolling() {
+  if (pollInterval) return;
+  pollInterval = setInterval(checkPipelineStatus, 3000);
+}
+
+async function checkPipelineStatus() {
+  try {
+    const r = await fetch('/api/run/status');
+    const d = await r.json();
+    const badge = document.getElementById('pipeline-badge');
+    const btn = document.getElementById('btn-run');
+    const logOut = document.getElementById('log-output');
+
+    if (d.running) {
+      _pipeline_state_running = true;
+      badge.classList.remove('hidden');
+      badge.classList.add('flex');
+      btn.disabled = true;
+      btn.textContent = 'Running…';
+      logOut.textContent = d.log.join('\n');
+      logOut.scrollTop = logOut.scrollHeight;
+    } else {
+      _pipeline_state_running = false;
+      badge.classList.add('hidden');
+      badge.classList.remove('flex');
+      btn.disabled = false;
+      btn.innerHTML = `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh Data`;
+      if (d.log.length) logOut.textContent = d.log.join('\n');
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+        // Reload data
+        _invalidateAndReload();
+      }
+    }
+  } catch(e) {}
+}
+
+async function _invalidateAndReload() {
+  await loadDataInfo();
+  await loadConsistency();
+  await loadStockList();
+}
+</script>
+</body>
+</html>

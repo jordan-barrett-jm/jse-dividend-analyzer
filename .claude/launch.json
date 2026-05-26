@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "JSE Dividend App",
+      "runtimeExecutable": "/Users/jordan/Desktop/JSE Dividend Scripts and Analysis/venv/bin/uvicorn",
+      "runtimeArgs": ["app:app", "--port", "8000", "--app-dir", "/Users/jordan/Desktop/JSE Dividend Scripts and Analysis"],
+      "port": 8000
+    }
+  ]
+}
