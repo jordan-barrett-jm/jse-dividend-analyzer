@@ -7,7 +7,6 @@ import asyncio
 import json
 import math
 import re
-import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -62,30 +61,6 @@ def _invalidate_cache():
     _cache.clear()
 
 
-# ── FX rates ───────────────────────────────────────────────────────────────────
-
-_fx_cache: dict = {}   # {"rates": {...}, "fetched_date": "YYYY-MM-DD"}
-
-def _to_jmd(amount: float, currency: str) -> float:
-    """Convert an amount in any currency to JMD using cached daily FX rates."""
-    if not currency or currency == "JMD":
-        return amount
-    today_str = date.today().isoformat()
-    if _fx_cache.get("fetched_date") != today_str:
-        try:
-            with urllib.request.urlopen(
-                "https://open.er-api.com/v6/latest/JMD", timeout=5
-            ) as resp:
-                data = json.loads(resp.read())
-            _fx_cache["rates"] = data.get("rates", {})
-            _fx_cache["fetched_date"] = today_str
-        except Exception:
-            pass   # if fetch fails, fall back to whatever is cached (or 1:1)
-    rate = _fx_cache.get("rates", {}).get(currency)
-    if rate and rate > 0:
-        # rate = units of `currency` per 1 JMD  →  JMD = amount / rate
-        return amount / rate
-    return amount   # unknown currency — return as-is
 
 
 def _clean(obj):
@@ -113,10 +88,11 @@ def _load_dividends() -> pd.DataFrame:
     df = df.dropna(subset=["dividend_amount", "payment_date"])
     if "currency" not in df.columns:
         df["currency"] = "JMD"
-    # Pre-convert all amounts to JMD
-    df["dividend_amount_jmd"] = df.apply(
-        lambda r: _to_jmd(r["dividend_amount"], r.get("currency", "JMD")), axis=1
-    )
+    # dividend_amount_jmd is written by the pipeline; fall back to raw amount if missing
+    if "dividend_amount_jmd" not in df.columns:
+        df["dividend_amount_jmd"] = df["dividend_amount"]
+    else:
+        df["dividend_amount_jmd"] = pd.to_numeric(df["dividend_amount_jmd"], errors="coerce").fillna(df["dividend_amount"])
     _cache["dividends"] = df
     return df
 

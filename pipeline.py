@@ -8,6 +8,7 @@ Outputs: data/dividends.csv, data/prices.csv
 import asyncio
 import aiohttp
 import csv
+import json
 import random
 import re
 import time
@@ -299,6 +300,29 @@ async def scrape_prices(
 
 # ── pipeline entry point ───────────────────────────────────────────────────────
 
+async def fetch_fx_rates(session: aiohttp.ClientSession) -> dict[str, float]:
+    """Fetch today's rates relative to JMD from open.er-api.com.
+    Returns dict where rates[CCY] = units of CCY per 1 JMD."""
+    try:
+        text = await fetch(session, "https://open.er-api.com/v6/latest/JMD")
+        if text:
+            data = json.loads(text)
+            return data.get("rates", {})
+    except Exception:
+        pass
+    return {}
+
+
+def _convert_to_jmd(amount: float, currency: str, rates: dict[str, float]) -> float:
+    """Convert amount in any currency to JMD. Falls back to original if rate unknown."""
+    if not currency or currency == "JMD":
+        return amount
+    rate = rates.get(currency)
+    if rate and rate > 0:
+        return amount / rate   # rates[CCY] = CCY per 1 JMD → JMD = amount / rate
+    return amount
+
+
 async def run_pipeline(status_cb=None, force: bool = False):
     started = time.time()
     if status_cb:
@@ -308,13 +332,24 @@ async def run_pipeline(status_cb=None, force: bool = False):
         # Listings first — both scrapers need the symbol/company list
         companies = await get_companies(session, status_cb)
 
-        dividends, prices = await asyncio.gather(
+        dividends, prices, fx_rates = await asyncio.gather(
             scrape_dividends(session, companies, status_cb),
             scrape_prices(session, status_cb, force=force),
+            fetch_fx_rates(session),
+        )
+
+    non_jmd = {r["currency"] for r in dividends if r.get("currency", "JMD") != "JMD"}
+    if status_cb:
+        status_cb(f"FX: converting {non_jmd or 'none'} → JMD")
+
+    for r in dividends:
+        r["dividend_amount_jmd"] = round(
+            _convert_to_jmd(r["dividend_amount"], r.get("currency", "JMD"), fx_rates), 6
         )
 
     div_fields = ["company_name", "symbol", "sector", "market",
-                  "record_date", "ex_date", "payment_date", "dividend_amount", "currency"]
+                  "record_date", "ex_date", "payment_date",
+                  "dividend_amount", "currency", "dividend_amount_jmd"]
     with open(DIVIDENDS_CSV, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=div_fields)
         w.writeheader()
