@@ -4,6 +4,7 @@ JSE Dividend & Price Pipeline
 - Prices:    fetched from JSE Investor JSON API (72 months per symbol)
 Outputs: data/dividends.csv, data/prices.csv
 """
+from __future__ import annotations
 
 import asyncio
 import aiohttp

@@ -3,6 +3,8 @@ JSE Dividend Analysis – FastAPI web app
 Run: venv/bin/uvicorn app:app --reload --port 8000
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import math
